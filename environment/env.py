@@ -1,8 +1,129 @@
+
 import time
 import pprint
 import random
 import bisect
-import pandas as pd
+
+
+class Agent(object):
+    def __init__(self, ID, initial_funds, stocks):
+        self.ID = ID
+        self.total_funds = initial_funds
+        self.effective_funds = initial_funds
+        self.portfolio = {k: [v, 0, 0] for k, v in stocks.items()}
+        self.order_no = 1
+
+    def get_portfolio(self):
+        return {k: v[1:] for k, v in self.portfolio.items()}
+
+    def get_value(self, stock):
+        current_price = self.portfolio[stock][0].get_price()
+        if current_price is not None:
+            return self.portfolio[stock][0].get_price() * self.portfolio[stock][1]
+
+    def make_add_order(self, stock, buy_sell='buy', qty=1, price=None):
+        if price == None:
+            price = self.portfolio[stock][0].get_price()  # use the market price if price not provided
+
+        if price != None:
+            return {'order_id': 'T' + str(self.ID) + '_' + str(self.order_no), 'timestamp': time.clock(), 'type': 'add',
+                    'quantity': qty, 'side': buy_sell, 'price': price}
+        else:
+            print("Error: Price is None")
+
+    def place_order(self, stock, order):
+        if order['side'] == 'buy':
+            if self.effective_funds >= order['price'] * order['quantity']:
+                self.effective_funds -= order['price'] * order['quantity']
+                self.order_no += 1
+                return self.portfolio[stock][0].process_order(order)
+            else:
+                print("Not enough effective funds to place order")
+        elif order['side'] == 'sell':
+            if self.portfolio[stock][2] >= order['quantity']:
+                self.portfolio[stock][2] -= order['quantity']
+                self.order_no += 1
+                return self.portfolio[stock][0].process_order(order)
+            else:
+                print("Not enough effective qty to place order. Available effective qty = ", self.portfolio[stock][2])
+
+
+
+class Exchange(object):
+
+    def __init__(self, num_agents, initial_money, IPO):
+        self.stocks = {"S" + str(i): Orderbook() for i in range(1, len(IPO) + 1)}
+        self.agents = {"T" + str(i): Agent(i, initial_money, self.stocks) for i in range(1, num_agents + 1)}
+
+        self.agents["T-1"] = Agent(-1, 0, self.stocks)
+
+        # initializing the IPO agent's portfolio with stocks
+        for stock in self.stocks.keys():
+            self.agents["T-1"].portfolio[stock][1] = IPO[stock][1]
+            self.agents["T-1"].portfolio[stock][2] = IPO[stock][1]
+            self.place_add_order("T-1", stock, buy_sell='sell', qty=IPO[stock][1], price=IPO[stock][0])
+
+        # print(self.get_agents_status())
+
+    def get_agents_status(self):
+        d = {}
+        for agent, data in self.agents.items():
+            d[agent] = (data.total_funds, data.effective_funds, data.get_portfolio())
+
+        return d
+
+    def get_total_funds(self, agent):
+        return self.agents[agent].total_funds
+
+    def get_effective_funds(self, agent):
+        return self.agents[agent].effective_funds
+
+    def get_portfolio(self, agent):
+        return self.agents[agent].get_portfolio()
+
+    def place_add_order(self, agent, stock, buy_sell='buy', qty=1, price=None):
+        o = self.agents[agent].make_add_order(stock, buy_sell, qty, price)
+        trades = self.agents[agent].place_order(stock, o)
+        # print(trades)
+
+        if trades != None:
+            for trade in trades:
+                io = self.stocks[stock].order_history[trade['incoming_order_id']]
+                ro = self.stocks[stock].order_history[trade['resting_order_id']]
+                io_t = io['order_id'].split('_')[0]
+                ro_t = ro['order_id'].split('_')[0]
+
+                self.do_bookkeeping(io_t, stock, trade, io)
+                self.do_bookkeeping(ro_t, stock, trade, ro)
+
+        return trades
+
+    def place_delta_add_order(self, agent, new_portfolio):
+        current_portfolio = e.get_portfolio(agent)
+        assert (len(new_portfolio) == len(current_portfolio))
+
+        for stock, qty in current_portfolio.items():
+            diff = new_portfolio[stock] - qty[1]
+            if diff > 0:  # need to place buy orders
+                self.place_add_order(agent, stock, buy_sell='buy', qty=diff)
+            elif diff < 0:  # need to place sell orders
+                self.place_add_order(agent, stock, buy_sell='sell', qty=-diff)
+
+    def do_bookkeeping(self, agent, stock, trade, orignal_order):
+        if orignal_order['side'] == 'buy' and orignal_order['type'] == 'add':
+            self.agents[agent].effective_funds += trade['quantity'] * orignal_order['price']
+            self.agents[agent].effective_funds -= trade['quantity'] * trade['price']
+            self.agents[agent].total_funds -= trade['quantity'] * trade['price']
+            self.agents[agent].portfolio[stock][1] += trade['quantity']
+            self.agents[agent].portfolio[stock][2] += trade['quantity']
+        elif orignal_order['side'] == 'sell' and orignal_order['type'] == 'add':
+            self.agents[agent].effective_funds += trade['quantity'] * trade['price']
+            self.agents[agent].total_funds += trade['quantity'] * trade['price']
+            self.agents[agent].portfolio[stock][1] -= trade['quantity']
+
+    def get_order_book(self, stock):
+        return (self.stocks[stock]._bid_book, self.stocks[stock]._ask_book)
+
 
 
 class Orderbook(object):
@@ -300,133 +421,3 @@ class Orderbook(object):
         return self._last_settled_price
 
 
-class Agent(object):
-    def __init__(self, ID, initial_funds, stocks):
-        self.ID = ID
-        self.total_funds = initial_funds
-        self.effective_funds = initial_funds
-        self.portfolio = {k: [v, 0, 0] for k, v in stocks.items()}
-        self.order_no = 1
-
-    def get_portfolio(self):
-        return {k: v[1:] for k, v in self.portfolio.items()}
-
-    def get_value(self, stock):
-        current_price = self.portfolio[stock][0].get_price()
-        if current_price is not None:
-            return self.portfolio[stock][0].get_price() * self.portfolio[stock][1]
-
-    def make_add_order(self, stock, buy_sell='buy', qty=1, price=None):
-        if price == None:
-            price = self.portfolio[stock][0].get_price()  # use the market price if price not provided
-
-        if price != None:
-            return {'order_id': 'T' + str(self.ID) + '_' + str(self.order_no), 'timestamp': time.clock(), 'type': 'add',
-                    'quantity': qty, 'side': buy_sell, 'price': price}
-        else:
-            print("Error: Price is None")
-
-    def place_order(self, stock, order):
-        if order['side'] == 'buy':
-            if self.effective_funds >= order['price'] * order['quantity']:
-                self.effective_funds -= order['price'] * order['quantity']
-                self.order_no += 1
-                return self.portfolio[stock][0].process_order(order)
-            else:
-                print("Not enough effective funds to place order")
-        elif order['side'] == 'sell':
-            if self.portfolio[stock][2] >= order['quantity']:
-                self.portfolio[stock][2] -= order['quantity']
-                self.order_no += 1
-                return self.portfolio[stock][0].process_order(order)
-            else:
-                print("Not enough effective qty to place order. Available effective qty = ", self.portfolio[stock][2])
-
-
-class Exchange(object):
-
-    def __init__(self, num_agents, initial_money, IPO):
-        self.stocks = {"S" + str(i): Orderbook() for i in range(1, len(IPO) + 1)}
-        self.agents = {"T" + str(i): Agent(i, initial_money, self.stocks) for i in range(1, num_agents + 1)}
-
-        self.agents["T-1"] = Agent(-1, 0, self.stocks)
-
-        # initializing the IPO agent's portfolio with stocks
-        for stock in self.stocks.keys():
-            self.agents["T-1"].portfolio[stock][1] = IPO[stock][1]
-            self.agents["T-1"].portfolio[stock][2] = IPO[stock][1]
-            self.place_add_order("T-1", stock, buy_sell='sell', qty=IPO[stock][1], price=IPO[stock][0])
-
-        # print(self.get_agents_status())
-
-    def get_agents_status(self):
-        d = {}
-        for agent, data in self.agents.items():
-            d[agent] = (data.total_funds, data.effective_funds, data.get_portfolio())
-
-        return d
-
-    def get_total_funds(self, agent):
-        return self.agents[agent].total_funds
-
-    def get_effective_funds(self, agent):
-        return self.agents[agent].effective_funds
-
-    def get_portfolio(self, agent):
-        return self.agents[agent].get_portfolio()
-
-    def place_add_order(self, agent, stock, buy_sell='buy', qty=1, price=None):
-        o = self.agents[agent].make_add_order(stock, buy_sell, qty, price)
-        trades = self.agents[agent].place_order(stock, o)
-        # print(trades)
-
-        if trades != None:
-            for trade in trades:
-                io = self.stocks[stock].order_history[trade['incoming_order_id']]
-                ro = self.stocks[stock].order_history[trade['resting_order_id']]
-                io_t = io['order_id'].split('_')[0]
-                ro_t = ro['order_id'].split('_')[0]
-
-                self.do_bookkeeping(io_t, stock, trade, io)
-                self.do_bookkeeping(ro_t, stock, trade, ro)
-
-        return trades
-
-    def place_delta_add_order(self, agent, new_portfolio):
-        current_portfolio = e.get_portfolio(agent)
-        assert (len(new_portfolio) == len(current_portfolio))
-
-        for stock, qty in current_portfolio.items():
-            diff = new_portfolio[stock] - qty[1]
-            if diff > 0:  # need to place buy orders
-                self.place_add_order(agent, stock, buy_sell='buy', qty=diff)
-            elif diff < 0:  # need to place sell orders
-                self.place_add_order(agent, stock, buy_sell='sell', qty=-diff)
-
-    def do_bookkeeping(self, agent, stock, trade, orignal_order):
-        if orignal_order['side'] == 'buy' and orignal_order['type'] == 'add':
-            self.agents[agent].effective_funds += trade['quantity'] * orignal_order['price']
-            self.agents[agent].effective_funds -= trade['quantity'] * trade['price']
-            self.agents[agent].total_funds -= trade['quantity'] * trade['price']
-            self.agents[agent].portfolio[stock][1] += trade['quantity']
-            self.agents[agent].portfolio[stock][2] += trade['quantity']
-        elif orignal_order['side'] == 'sell' and orignal_order['type'] == 'add':
-            self.agents[agent].effective_funds += trade['quantity'] * trade['price']
-            self.agents[agent].total_funds += trade['quantity'] * trade['price']
-            self.agents[agent].portfolio[stock][1] -= trade['quantity']
-
-    def get_order_book(self, stock):
-        return (self.stocks[stock]._bid_book, self.stocks[stock]._ask_book)
-
-
-if __name__ == "__main__":
-    IPO = {"S1": (10, 200)}  # price, qty
-    e = Exchange(2, 10000, IPO)  # 2 agents
-    a = e.place_add_order('T1', "S1", buy_sell='buy', qty=200, price=10)  # 1st agent buying the IPO
-    print(e.get_agents_status())
-
-    b = e.place_add_order('T1', "S1", buy_sell='sell', qty=1, price=101)  # first Agent selling a stock for 101
-    print(e.get_agents_status())
-
-    c = e.place_add_order('T1', "S1", buy_sell='buy', qty=1, price=102)  # first agent buying the stock
-    print(e.get_agents_status())

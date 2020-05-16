@@ -1,1 +1,1 @@
-# Trade exchange with RL agents
+# Virtual stock exchange simulations
