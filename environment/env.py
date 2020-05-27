@@ -8,7 +8,7 @@ import bisect
 class Agent(object):
     def __init__(self, ID, initial_funds, stocks):
         self.ID = ID
-        self.total_funds = initial_funds
+        self.total_funds = initial_funds        # total funds are the cash at hand available with the agent
         self.effective_funds = initial_funds
         self.portfolio = {k: [v, 0, 0] for k, v in stocks.items()}
         self.order_no = 1
@@ -20,6 +20,12 @@ class Agent(object):
         current_price = self.portfolio[stock][0].get_price()
         if current_price is not None:
             return self.portfolio[stock][0].get_price() * self.portfolio[stock][1]
+    
+    def get_total_portfolio_value(self):
+        value_from_stocks=0
+        for stock in self.portfolio.keys():
+            value_from_stocks+=self.get_value(stock)
+        return self.total_funds+value_from_stocks
 
     def make_add_order(self, stock, buy_sell='buy', qty=1, price=None):
         if price == None:
@@ -82,6 +88,8 @@ class Exchange(object):
         return self.agents[agent].get_portfolio()
 
     def place_add_order(self, agent, stock, buy_sell='buy', qty=1, price=None):
+        if qty<=0 or price<=0:
+            return None
         o = self.agents[agent].make_add_order(stock, buy_sell, qty, price)
         trades = self.agents[agent].place_order(stock, o)
         # print(trades)
@@ -99,6 +107,8 @@ class Exchange(object):
         return trades
 
     def place_delta_add_order(self, agent, new_portfolio):
+        if new_portfolio==e.get_portfolio(agent):
+            return
         current_portfolio = e.get_portfolio(agent)
         assert (len(new_portfolio) == len(current_portfolio))
 

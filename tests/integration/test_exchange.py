@@ -28,6 +28,8 @@ class TestExchange(unittest.TestCase):
         stock_price = e.stocks['S1']._last_settled_price
 
         self.assertEqual(stock_price, 10)
+    
+    
 
 if __name__ == '__main__':
     unittest.main()
